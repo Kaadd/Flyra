@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
+from .flight_service import get_flight_info
 
 app = FastAPI(title="Flyra API", version="1.0.0")
 
@@ -27,16 +28,36 @@ async def hello():
 
 @app.get("/api/flight")
 async def flight(flight_id: str):
-    # Mock data
-    return {
-        "flight_id": flight_id,
-        "flight_number": flight_id.upper(),
-        "flight_status": "On time",
-        "flight_time": "10:00 AM",
-        "flight_date": "2025-01-01",
-        "flight_gate": "A1",
-        "flight_terminal": "1",
-    }
+    """
+    Get flight information from Aviation Stack API.
+    
+    Args:
+        flight_id: Flight number (e.g., "UA837", "AA100")
+    
+    Returns:
+        Flight information dictionary
+    """
+    try:
+        flight_data = await get_flight_info(flight_id)
+        
+        if flight_data is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Flight {flight_id} not found"
+            )
+        
+        return flight_data
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 # Vercel serverless handler
 handler = Mangum(app)
