@@ -77,6 +77,7 @@ def format_flight_response(flight_data: Dict[str, Any], flight_number: str) -> D
     departure = flight_data.get("departure", {})
     arrival = flight_data.get("arrival", {})
     airline = flight_info.get("iata", "")
+    aircraft = flight_data.get("aircraft", {})
     
     # Extract flight status
     flight_status = flight_data.get("flight_status", "unknown").title()
@@ -109,6 +110,13 @@ def format_flight_response(flight_data: Dict[str, Any], flight_number: str) -> D
     gate = departure.get("gate", "TBD")
     terminal = departure.get("terminal", "TBD")
     
+    # Get additional flight details for AI context
+    aircraft_type = aircraft.get("iata", "") or aircraft.get("icao24", "") or "Unknown"
+    departure_airport = departure.get("airport", "") or departure.get("iata", "")
+    arrival_airport = arrival.get("airport", "") or arrival.get("iata", "")
+    departure_delay = departure.get("delay")
+    arrival_delay = arrival.get("delay")
+    
     return {
         "flight_id": flight_number,
         "flight_number": flight_info.get("number", flight_number),
@@ -117,5 +125,12 @@ def format_flight_response(flight_data: Dict[str, Any], flight_number: str) -> D
         "flight_date": flight_date,
         "flight_gate": gate if gate else "TBD",
         "flight_terminal": terminal if terminal else "TBD",
+        # Additional context for AI
+        "aircraft_type": aircraft_type,
+        "departure_airport": departure_airport,
+        "arrival_airport": arrival_airport,
+        "departure_delay": departure_delay,
+        "arrival_delay": arrival_delay,
+        "raw_data": flight_data  # Include raw data for more context
     }
 

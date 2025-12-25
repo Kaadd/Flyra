@@ -40,6 +40,34 @@ class FlightService {
             throw FlightError.decodingError(error)
         }
     }
+    
+    func fetchCalmingMessage(flightID: String) async throws -> CalmingMessageResponse {
+        guard let encodedFlightID = flightID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(baseURL)/api/flight/\(encodedFlightID)/calming-message") else {
+            throw FlightError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw FlightError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw FlightError.serverError(httpResponse.statusCode)
+        }
+        
+        do {
+            let calmingMessage = try JSONDecoder().decode(CalmingMessageResponse.self, from: data)
+            return calmingMessage
+        } catch {
+            throw FlightError.decodingError(error)
+        }
+    }
 }
 
 enum FlightError: LocalizedError {

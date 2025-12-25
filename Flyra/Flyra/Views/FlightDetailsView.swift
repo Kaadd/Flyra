@@ -10,6 +10,11 @@ import SwiftUI
 struct FlightDetailsView: View {
     let flight: Flight
     @Environment(\.dismiss) var dismiss
+    @State private var calmingMessage: String?
+    @State private var isLoadingCalmingMessage: Bool = false
+    @State private var calmingMessageError: String?
+    
+    private let flightService = FlightService()
     
     var body: some View {
         ZStack {
@@ -108,12 +113,87 @@ struct FlightDetailsView: View {
                     .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
                     .padding(.horizontal, 20)
                     
+                    // Calming Message Button
+                    Button(action: {
+                        Task {
+                            await fetchCalmingMessage()
+                        }
+                    }) {
+                        HStack {
+                            if isLoadingCalmingMessage {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "heart.fill")
+                                    .font(.system(size: 18, weight: .semibold))
+                                Text("Get Words of Encouragement")
+                                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.60, green: 0.80, blue: 0.90), // Soft blue
+                                    Color(red: 0.70, green: 0.85, blue: 0.75)  // Soft green
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(16)
+                        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                    }
+                    .disabled(isLoadingCalmingMessage)
+                    .opacity(isLoadingCalmingMessage ? 0.7 : 1.0)
+                    .padding(.horizontal, 20)
+                    
+                    // Calming Message Display
+                    if let message = calmingMessage {
+                        CalmingMessageCard(message: message)
+                            .padding(.horizontal, 20)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .move(edge: .bottom)).combined(with: .scale(scale: 0.9)),
+                                removal: .opacity.combined(with: .scale(scale: 0.95))
+                            ))
+                            .animation(.spring(response: 0.6, dampingFraction: 0.8), value: calmingMessage != nil)
+                    }
+                    
+                    // Error Message
+                    if let error = calmingMessageError {
+                        Text(error)
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 20)
+                    }
+                    
                     Spacer()
                 }
                 .padding(.top, 20)
             }
         }
         .navigationBarHidden(true)
+    }
+    
+    private func fetchCalmingMessage() async {
+        isLoadingCalmingMessage = true
+        calmingMessageError = nil
+        
+        do {
+            let response = try await flightService.fetchCalmingMessage(flightID: flight.flight_id)
+            await MainActor.run {
+                self.calmingMessage = response.calming_message
+                self.isLoadingCalmingMessage = false
+            }
+        } catch {
+            await MainActor.run {
+                self.isLoadingCalmingMessage = false
+                self.calmingMessageError = error.localizedDescription
+            }
+        }
     }
     
     private func statusColor(for status: String) -> Color {
@@ -146,6 +226,59 @@ struct DetailRow: View {
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundColor(Color(red: 0.15, green: 0.25, blue: 0.40))
         }
+    }
+}
+
+struct CalmingMessageCard: View {
+    let message: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(Color(red: 0.50, green: 0.70, blue: 0.85))
+                
+                Text("Words of Encouragement")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundColor(Color(red: 0.15, green: 0.25, blue: 0.40))
+                
+                Spacer()
+            }
+            
+            Text(message)
+                .font(.system(size: 17, weight: .regular, design: .rounded))
+                .foregroundColor(Color(red: 0.20, green: 0.30, blue: 0.45))
+                .lineSpacing(6)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(24)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.95, green: 0.97, blue: 1.0), // Very light blue
+                    Color(red: 0.92, green: 0.96, blue: 0.98)  // Soft white-blue
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(20)
+        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.70, green: 0.85, blue: 0.95).opacity(0.3),
+                            Color(red: 0.75, green: 0.90, blue: 0.85).opacity(0.3)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
     }
 }
 

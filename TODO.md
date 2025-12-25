@@ -1,0 +1,5 @@
+[ ] Decide on information to display (12/25/25)
+[ ] Decide API to use, needs Altitude, Origin, Destination, Position, Speed (12/26)
+[ ] Design main dashboard (12/28)
+[ ] Create main dashboard (12/30)
+[ ] Improve AI Words of affirmation (1/2)
