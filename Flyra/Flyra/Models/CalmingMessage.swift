@@ -1,23 +1,22 @@
-//
-//  CalmingMessage.swift
-//  Flyra
-//
-//  Created by Kadir B. on 12/24/25.
-//
-
 import Foundation
 
-struct CalmingMessageResponse: Codable {
-    let flight_info: FlightInfo
-    let calming_message: String
-}
-
-struct FlightInfo: Codable {
-    let flight_number: String?
-    let flight_status: String?
-    let flight_time: String?
-    let flight_date: String?
-    let flight_gate: String?
-    let flight_terminal: String?
+struct CalmingMessage: Codable {
+    let flightId: String
+    let message: String
+    let flightData: Flight?
+    
+    enum CodingKeys: String, CodingKey {
+        case flightId = "flight_id"
+        case message
+        case flightData = "flight_data"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        flightId = try container.decode(String.self, forKey: .flightId)
+        message = try container.decode(String.self, forKey: .message)
+        flightData = try container.decodeIfPresent(Flight.self, forKey: .flightData)
+    }
 }
 

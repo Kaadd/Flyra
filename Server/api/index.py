@@ -1,15 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
 from pydantic import BaseModel
-from typing import Optional
+from mangum import Mangum
 from .flight_service import get_flight_info
-from .ai_service import simple_chat, chat_completion
-
-
-class ChatRequest(BaseModel):
-    message: str
-    system_message: Optional[str] = None
+from .ai_service import simple_chat
 
 app = FastAPI(title="Flyra API", version="1.0.0")
 
@@ -33,34 +27,6 @@ async def health():
 @app.get("/api/hello")
 async def hello():
     return {"message": "Hello from Flyra API!"}
-
-@app.post("/api/ai/chat")
-async def ai_chat(request: ChatRequest):
-    """
-    Simple AI chat endpoint.
-    
-    Args:
-        request: ChatRequest with message and optional system_message
-    
-    Returns:
-        AI response
-    """
-    try:
-        response = await simple_chat(
-            user_message=request.message,
-            system_message=request.system_message
-        )
-        return {"response": response}
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=str(e)
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI service error: {str(e)}"
-        )
 
 @app.get("/api/flight")
 async def flight(flight_id: str):
@@ -95,19 +61,54 @@ async def flight(flight_id: str):
             detail=f"Internal server error: {str(e)}"
         )
 
-@app.get("/api/flight/{flight_id}/calming-message")
-async def flight_calming_message(flight_id: str):
+
+class ChatRequest(BaseModel):
+    message: str
+    system_prompt: str = None
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(request: ChatRequest):
     """
-    Get a calming and informative message about the flight status.
+    AI chat endpoint.
+    
+    Args:
+        request: ChatRequest with message and optional system_prompt
+    
+    Returns:
+        AI response
+    """
+    try:
+        response = await simple_chat(
+            user_message=request.message,
+            system_prompt=request.system_prompt
+        )
+        return {"response": response}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@app.get("/api/flight/{flight_id}/calming-message")
+async def get_calming_message(flight_id: str):
+    """
+    Get AI-generated calming message based on flight information.
     
     Args:
         flight_id: Flight number (e.g., "UA837", "AA100")
     
     Returns:
-        Dictionary with flight info and AI-generated calming message
+        Calming message with flight context
     """
     try:
-        # Get flight information
+        # Get flight data
         flight_data = await get_flight_info(flight_id)
         
         if flight_data is None:
@@ -116,100 +117,83 @@ async def flight_calming_message(flight_id: str):
                 detail=f"Flight {flight_id} not found"
             )
         
-        # Build context for AI
-        raw_data = flight_data.get("raw_data", {})
-        flight_info = raw_data.get("flight", {})
-        departure = raw_data.get("departure", {})
-        arrival = raw_data.get("arrival", {})
-        aircraft = raw_data.get("aircraft", {})
+        # Get actual values from flight data at the time button is pressed
+        altitude = flight_data.get('altitude_ft')
+        speed = flight_data.get('speed_mph')
+        origin = flight_data.get('departure_airport', 'Unknown')
+        destination = flight_data.get('arrival_airport', 'Unknown')
+        status = flight_data.get('flight_status', 'Unknown')
         
-        # Extract relevant information
-        flight_status = flight_data.get("flight_status", "unknown")
-        aircraft_type = aircraft.get("iata", "") or aircraft.get("icao24", "") or "aircraft"
-        departure_airport = departure.get("airport", "") or departure.get("iata", "")
-        arrival_airport = arrival.get("airport", "") or arrival.get("iata", "")
-        departure_delay = departure.get("delay")
-        
-        # Build flight context string
+        # Build context for AI with explicit values - these are the EXACT values at button press time
         flight_context = f"""
-Flight Information:
-- Flight Number: {flight_data.get('flight_number', flight_id)}
-- Status: {flight_status}
-- Aircraft Type: {aircraft_type}
-- Departure Airport: {departure_airport}
-- Arrival Airport: {arrival_airport}
-- Scheduled Time: {flight_data.get('flight_time', 'TBD')}
-- Gate: {flight_data.get('flight_gate', 'TBD')}
-- Terminal: {flight_data.get('flight_terminal', 'TBD')}
+Current Flight Status (exact values at this moment):
+- Flight Number: {flight_data.get('flight_number', 'Unknown')}
+- Status: {status}
+- Aircraft Type: {flight_data.get('aircraft_type', 'Unknown')}
+- CURRENT ALTITUDE: {altitude} feet
+- CURRENT SPEED: {speed} mph
+- ORIGIN: {origin}
+- DESTINATION: {destination}
+- ETA: {flight_data.get('eta', 'Unknown')}
+- Distance Remaining: {flight_data.get('distance_miles', 'Unknown')} miles
 """
         
-        if departure_delay:
-            flight_context += f"- Departure Delay: {departure_delay} minutes\n"
-        
-        # Add any additional flight phase information if available
-        if raw_data.get("live"):
-            live_data = raw_data.get("live", {})
-            altitude = live_data.get("altitude")
-            speed = live_data.get("speed")
-            direction = live_data.get("direction")
-            
-            if altitude:
-                flight_context += f"- Current Altitude: {altitude} feet\n"
-            if speed:
-                flight_context += f"- Current Speed: {speed} km/h\n"
-            if direction:
-                flight_context += f"- Direction: {direction}°\n"
-        
-        # Create system message for AI
-        system_message = """You are a flight calming assistant. I'm going to give you information about a flight's current status, and you are going to give me a sentence or two that is both informative and calming. 
+        system_prompt = """You are a flight calming assistant. Your job is to reassure passengers that everything is fine and normal. Be very calming, reassuring, and emphasize that everything is operating normally.
 
-Your responses should:
-- Explain what's happening in simple, reassuring terms
-- Use technical terms when helpful but explain them clearly
-- Be calming and reassuring
-- Be concise (1-2 sentences)
-- Focus on normal, safe operations
+IMPORTANT: 
+- You MUST use the EXACT altitude and speed values provided (do not make up numbers)
+- Always reassure that everything is fine and normal
+- Keep it brief (1-2 sentences)
+- Be very calming and reassuring
 
 Examples:
-- If the flight is taxiing: "The scrubbing noise you might have heard is coming from the PTU (Power Transfer Unit). The PTU is a normal part of the aircraft's hydraulic system that helps maintain pressure - it's completely safe and expected during taxiing."
-- If at altitude 7000 feet: "You might feel a falling sensation around 10,000 feet - this is completely normal. The pitch of the airplane is going down because we've safely completed takeoff and are now gradually climbing to our cruising altitude."
-- If delayed: "We're experiencing a brief delay, which gives our crew extra time to ensure everything is perfectly prepared for a safe and comfortable flight."
-- If on time: "Everything is proceeding smoothly. The aircraft is ready and we're on schedule for an on-time departure."
-"""
+- If the flight is taxiing: "The scrubbing noise you might've heard is coming from the PTU. The PTU is the Power Transfer Unit, which helps operate the landing gear and brakes. This is completely normal during taxiing."
+- At altitude 7000 feet: "You might feel a falling sensation around 10000 feet, this is normal. The pitch of the airplane is going down because we are safely done with takeoff and we are slowly climbing to our cruising altitude."
+- At cruising altitude: "We're now at our cruising altitude of [altitude] feet. The smooth flight you're experiencing is thanks to the stable air at this height. You can relax and enjoy the journey."
+- Takeoff: "We're now taking off. you may feel like youre being pressed into your seat, this is normal."
+Use the exact values provided and keep responses concise (1-2 sentences), very reassuring, and educational."""
         
-        user_message = f"Here is the current flight information:\n{flight_context}\n\nPlease provide a calming and informative message about this flight's status."
+        user_message = f"{flight_context}\n\nGenerate a calming, informative message about this flight's current status. Use these EXACT values: Altitude: {altitude} feet, Speed: {speed} mph, Origin: {origin}, Destination: {destination}."
         
-        # Generate calming message
-        calming_message = await simple_chat(
-            user_message=user_message,
-            system_message=system_message,
-            model="gpt-3.5-turbo"
-        )
+        # Get AI response
+        try:
+            calming_message = await simple_chat(
+                user_message=user_message,
+                system_prompt=system_prompt
+            )
+        except ValueError as e:
+            # OpenAI key missing or invalid
+            raise HTTPException(
+                status_code=400,
+                detail=f"AI service error: {str(e)}"
+            )
+        except Exception as e:
+            # Other OpenAI API errors
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI service error: {str(e)}"
+            )
         
         return {
-            "flight_info": {
-                "flight_number": flight_data.get("flight_number"),
-                "flight_status": flight_data.get("flight_status"),
-                "flight_time": flight_data.get("flight_time"),
-                "flight_date": flight_data.get("flight_date"),
-                "flight_gate": flight_data.get("flight_gate"),
-                "flight_terminal": flight_data.get("flight_terminal"),
-            },
-            "calming_message": calming_message
+            "flight_id": flight_id,
+            "message": calming_message,
+            "flight_data": flight_data
         }
         
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=400,
             detail=str(e)
         )
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error generating calming message: {str(e)}"
+            detail=f"Internal server error: {str(e)}"
         )
+
 
 # Vercel serverless handler
 handler = Mangum(app)

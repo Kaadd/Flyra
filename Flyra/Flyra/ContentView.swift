@@ -80,14 +80,13 @@ struct CloudShape: Shape {
 
 struct ContentView: View {
     @State private var flightID: String = ""
-    @State private var isLoading: Bool = false
+    @State private var selectedFlight: Flight?
+    @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var flight: Flight?
-    
-    private let flightService = FlightService()
     
     var body: some View {
-        ZStack {
+        NavigationStack {
+            ZStack {
             // Sky-like gradient background
             LinearGradient(
                 colors: [
@@ -181,76 +180,92 @@ struct ContentView: View {
                 .padding(.horizontal, 32)
                 .padding(.bottom, 40)
                 
-                // Error Message
-                if let errorMessage = errorMessage {
-                    Text(errorMessage)
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundColor(.red)
-                        .padding(.horizontal, 32)
-                        .padding(.bottom, 8)
-                }
-                
                 // Track My Flight Button
                 Button(action: {
                     Task {
                         await fetchFlight()
                     }
                 }) {
-                    HStack {
-                        if isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        } else {
-                            Text("Track My Flight")
-                                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white)
-                        }
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                    } else {
+                        Text("Track My Flight")
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.40, green: 0.70, blue: 0.90), // Light blue
-                                Color(red: 0.50, green: 0.80, blue: 0.70)  // Light green
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(16)
-                    .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
                 }
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.40, green: 0.70, blue: 0.90), // Light blue
+                            Color(red: 0.50, green: 0.80, blue: 0.70)  // Light green
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .cornerRadius(16)
+                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
                 .disabled(flightID.trimmingCharacters(in: .whitespaces).isEmpty || isLoading)
                 .opacity(flightID.trimmingCharacters(in: .whitespaces).isEmpty || isLoading ? 0.5 : 1.0)
                 .padding(.horizontal, 32)
                 
+                if let error = errorMessage {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .padding(.horizontal, 32)
+                }
+                
                 Spacer()
             }
-        }
-        .sheet(item: $flight) { flight in
-            FlightDetailsView(flight: flight)
+            }
+            .navigationDestination(item: $selectedFlight) { flight in
+                FlightDetailsView(flight: flight)
+            }
         }
     }
     
     private func fetchFlight() async {
-        let trimmedID = flightID.trimmingCharacters(in: .whitespaces)
-        guard !trimmedID.isEmpty else { return }
-        
         isLoading = true
         errorMessage = nil
         
         do {
-            let fetchedFlight = try await flightService.fetchFlight(flightID: trimmedID)
+            let flight = try await FlightService.shared.fetchFlight(flightID: flightID.trimmingCharacters(in: .whitespaces))
             await MainActor.run {
-                self.flight = fetchedFlight
-                self.isLoading = false
+                selectedFlight = flight
+                isLoading = false
+            }
+        } catch let urlError as URLError {
+            await MainActor.run {
+                switch urlError.code {
+                case .notConnectedToInternet:
+                    errorMessage = "No internet connection. Please check your network."
+                case .cannotConnectToHost:
+                    errorMessage = "Cannot connect to server. Make sure the server is running on localhost:8000"
+                case .badServerResponse:
+                    errorMessage = "Server error. Flight not found or server returned an error."
+                case .badURL:
+                    errorMessage = "Invalid flight number format."
+                default:
+                    errorMessage = "Network error: \(urlError.localizedDescription)"
+                }
+                isLoading = false
+            }
+        } catch let decodingError as DecodingError {
+            await MainActor.run {
+                errorMessage = "Failed to parse flight data: \(decodingError.localizedDescription)"
+                isLoading = false
             }
         } catch {
             await MainActor.run {
-                self.isLoading = false
-                self.errorMessage = error.localizedDescription
+                errorMessage = "Failed to fetch flight: \(error.localizedDescription)"
+                isLoading = false
             }
         }
     }

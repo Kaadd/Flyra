@@ -1,136 +1,124 @@
-import os
-import httpx
-from typing import Optional, Dict, Any
-from dotenv import load_dotenv
+import random
+import math
+from typing import Optional, Dict, Any, Tuple
+from datetime import datetime, timedelta
+from .airport_coordinates import get_airport_coordinates, AIRPORT_COORDINATES
 
-# Load environment variables
-load_dotenv()
+# Allowed flight numbers and their routes
+FLIGHT_ROUTES = {
+    "AB61510": {"dep": "SFO", "arr": "NRT", "dep_name": "San Francisco International", "arr_name": "Narita International Airport"},
+    "ZZ001": {"dep": "JFK", "arr": "LHR", "dep_name": "John F. Kennedy International", "arr_name": "London Heathrow"},
+}
 
-AVIATION_STACK_BASE_URL = "https://api.aviationstack.com/v1"
-API_KEY = os.getenv("API_KEY")
+# List of allowed flight numbers
+ALLOWED_FLIGHT_NUMBERS = {"AB61510", "ZZ001"}
 
 
 async def get_flight_info(flight_number: str) -> Optional[Dict[str, Any]]:
     """
-    Fetch flight information from Aviation Stack API.
+    Generate fake flight information.
     
     Args:
-        flight_number: Flight number (e.g., "UA837", "AA100")
+        flight_number: Flight number (must be "AB61510" or "ZZ001")
     
     Returns:
         Dictionary with flight information or None if not found
     """
-    if not API_KEY:
-        raise ValueError("API_KEY not found in environment variables")
-    
     # Clean flight number (remove spaces, convert to uppercase)
     flight_number = flight_number.strip().upper()
     
-    # Extract airline code and flight number if needed
-    # Aviation Stack expects format like "UA837" or separate iata code
-    params = {
-        "access_key": API_KEY,
-        "flight_iata": flight_number,
-    }
+    # Only allow specific flight numbers
+    if flight_number not in ALLOWED_FLIGHT_NUMBERS:
+        return None
     
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{AVIATION_STACK_BASE_URL}/flights",
-                params=params
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Check if we have flight data
-            if data.get("data") and len(data["data"]) > 0:
-                flight_data = data["data"][0]
-                return format_flight_response(flight_data, flight_number)
-            else:
-                return None
-                
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            raise ValueError("Invalid API key")
-        elif e.response.status_code == 429:
-            raise ValueError("API rate limit exceeded")
-        else:
-            raise ValueError(f"API error: {e.response.status_code}")
-    except httpx.RequestError as e:
-        raise ValueError(f"Network error: {str(e)}")
-    except Exception as e:
-        raise ValueError(f"Error fetching flight data: {str(e)}")
-
-
-def format_flight_response(flight_data: Dict[str, Any], flight_number: str) -> Dict[str, Any]:
-    """
-    Format Aviation Stack API response to match our frontend format.
+    # Get route info (should always exist since we validated above)
+    route = FLIGHT_ROUTES.get(flight_number)
+    if not route:
+        return None
     
-    Args:
-        flight_data: Raw flight data from Aviation Stack API
-        flight_number: Original flight number query
+    # Get airport coordinates
+    dep_coords = get_airport_coordinates(route["dep"])
+    arr_coords = get_airport_coordinates(route["arr"])
     
-    Returns:
-        Formatted flight data dictionary
-    """
-    flight_info = flight_data.get("flight", {})
-    departure = flight_data.get("departure", {})
-    arrival = flight_data.get("arrival", {})
-    airline = flight_info.get("iata", "")
-    aircraft = flight_data.get("aircraft", {})
-    
-    # Extract flight status
-    flight_status = flight_data.get("flight_status", "unknown").title()
-    
-    # Format departure time
-    departure_time = departure.get("scheduled", "")
-    if departure_time:
-        try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(departure_time.replace("Z", "+00:00"))
-            flight_time = dt.strftime("%I:%M %p")
-        except:
-            flight_time = departure_time
+    # Generate fake live tracking data
+    # Calculate a point along the route (about 60% of the way)
+    if dep_coords and arr_coords:
+        dep_lat, dep_lng = dep_coords
+        arr_lat, arr_lng = arr_coords
+        
+        # Interpolate position (60% along route)
+        progress = 0.6
+        current_lat = dep_lat + (arr_lat - dep_lat) * progress
+        current_lng = dep_lng + (arr_lng - dep_lng) * progress
+        
+        # Calculate direction (bearing)
+        lat1, lon1 = math.radians(dep_lat), math.radians(dep_lng)
+        lat2, lon2 = math.radians(arr_lat), math.radians(arr_lng)
+        dlon = lon2 - lon1
+        y = math.sin(dlon) * math.cos(lat2)
+        x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+        direction = int((math.degrees(math.atan2(y, x)) + 360) % 360)
+        
+        # Calculate distance remaining
+        R = 3959  # Earth radius in miles
+        dlat = lat2 - lat1
+        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        total_distance = R * c
+        distance_miles = int(total_distance * (1 - progress))
     else:
-        flight_time = "TBD"
+        current_lat = 40.0
+        current_lng = -100.0
+        direction = 270
+        distance_miles = 2500
     
-    # Format date
-    departure_date = departure.get("scheduled", "")
-    if departure_date:
-        try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(departure_date.replace("Z", "+00:00"))
-            flight_date = dt.strftime("%Y-%m-%d")
-        except:
-            flight_date = departure_date.split("T")[0] if "T" in departure_date else departure_date
-    else:
-        flight_date = "TBD"
+    # Generate realistic flight data
+    now = datetime.now()
+    flight_time = now.strftime("%I:%M %p")
+    flight_date = now.strftime("%Y-%m-%d")
     
-    # Get gate and terminal
-    gate = departure.get("gate", "TBD")
-    terminal = departure.get("terminal", "TBD")
+    # Random but realistic values
+    altitude_ft = random.randint(35000, 40000)  # Cruising altitude
+    speed_mph = random.randint(500, 600)  # Typical cruising speed
     
-    # Get additional flight details for AI context
-    aircraft_type = aircraft.get("iata", "") or aircraft.get("icao24", "") or "Unknown"
-    departure_airport = departure.get("airport", "") or departure.get("iata", "")
-    arrival_airport = arrival.get("airport", "") or arrival.get("iata", "")
-    departure_delay = departure.get("delay")
-    arrival_delay = arrival.get("delay")
+    # Calculate ETA (about 2-3 hours from now for long flights)
+    eta_time = now + timedelta(hours=random.randint(2, 3))
+    eta = eta_time.strftime("%I:%M %p")
+    
+    # Flight status
+    statuses = ["Active", "On time", "In flight", "En route"]
+    flight_status = random.choice(statuses)
     
     return {
         "flight_id": flight_number,
-        "flight_number": flight_info.get("number", flight_number),
+        "flight_number": flight_number,
         "flight_status": flight_status,
         "flight_time": flight_time,
         "flight_date": flight_date,
-        "flight_gate": gate if gate else "TBD",
-        "flight_terminal": terminal if terminal else "TBD",
-        # Additional context for AI
-        "aircraft_type": aircraft_type,
-        "departure_airport": departure_airport,
-        "arrival_airport": arrival_airport,
-        "departure_delay": departure_delay,
-        "arrival_delay": arrival_delay,
-        "raw_data": flight_data  # Include raw data for more context
+        "flight_gate": f"G{random.randint(1, 20)}",
+        "flight_terminal": str(random.randint(1, 5)),
+        # Additional context
+        "aircraft_type": "Boeing 777",
+        "departure_airport": route["dep_name"],
+        "arrival_airport": route["arr_name"],
+        "departure_delay": None,
+        "arrival_delay": None,
+        # Live tracking data
+        "altitude_ft": altitude_ft,
+        "speed_mph": speed_mph,
+        "latitude": current_lat,
+        "longitude": current_lng,
+        "direction": direction,
+        # Airport coordinates
+        "departure_latitude": dep_coords[0] if dep_coords else None,
+        "departure_longitude": dep_coords[1] if dep_coords else None,
+        "arrival_latitude": arr_coords[0] if arr_coords else None,
+        "arrival_longitude": arr_coords[1] if arr_coords else None,
+        # ETA and distance
+        "eta": eta,
+        "distance_miles": distance_miles,
+        "raw_data": {}  # Empty for fake data
     }
+
+
 

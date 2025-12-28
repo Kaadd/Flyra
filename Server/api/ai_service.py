@@ -1,109 +1,74 @@
 import os
-from typing import Optional, Dict, Any, List
-from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_KEY")
+OPENAI_KEY = os.getenv("OPENAI_KEY")
 
 # Initialize OpenAI client
-client = None
-if OPENAI_API_KEY:
-    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+client = AsyncOpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
 
-async def chat_completion(
-    messages: List[Dict[str, str]],
-    model: str = "gpt-3.5-turbo",
-    temperature: float = 0.7,
-    max_tokens: Optional[int] = None
-) -> Optional[str]:
+async def chat_completion(messages: list, model: str = "gpt-4o-mini", temperature: float = 0.7):
     """
     Send a chat completion request to OpenAI.
     
     Args:
-        messages: List of message dictionaries with "role" and "content" keys
-                 Example: [{"role": "user", "content": "Hello!"}]
-        model: OpenAI model to use (default: "gpt-3.5-turbo")
-        temperature: Sampling temperature (0.0 to 2.0, default: 0.7)
-        max_tokens: Maximum tokens in response (optional)
+        messages: List of message dictionaries with 'role' and 'content'
+        model: Model to use (default: gpt-4o-mini)
+        temperature: Sampling temperature (default: 0.7)
     
     Returns:
-        Response content string or None if error
+        Response from OpenAI API
     """
     if not client:
         raise ValueError("OPENAI_KEY not found in environment variables")
     
-    try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        
-        if response.choices and len(response.choices) > 0:
-            return response.choices[0].message.content
-        return None
-        
-    except Exception as e:
-        raise ValueError(f"OpenAI API error: {str(e)}")
-
-
-async def simple_chat(
-    user_message: str,
-    system_message: Optional[str] = None,
-    model: str = "gpt-3.5-turbo"
-) -> str:
-    """
-    Simple chat function for single user messages.
-    
-    Args:
-        user_message: The user's message
-        system_message: Optional system message to set context
-        model: OpenAI model to use
-    
-    Returns:
-        AI response string
-    """
-    messages = []
-    
-    if system_message:
-        messages.append({
-            "role": "system",
-            "content": system_message
-        })
-    
-    messages.append({
-        "role": "user",
-        "content": user_message
-    })
-    
-    response = await chat_completion(messages, model=model)
-    
-    if not response:
-        raise ValueError("No response from OpenAI")
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature
+    )
     
     return response
 
 
-async def generate_text(
-    prompt: str,
-    model: str = "gpt-3.5-turbo",
-    temperature: float = 0.7
-) -> str:
+async def simple_chat(user_message: str, system_prompt: str = None, model: str = "gpt-4o-mini") -> str:
     """
-    Generate text from a simple prompt.
+    Simple chat function that takes a user message and optional system prompt.
+    
+    Args:
+        user_message: The user's message
+        system_prompt: Optional system prompt to set context
+        model: Model to use (default: gpt-4o-mini)
+    
+    Returns:
+        The assistant's response text
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_message})
+    
+    response = await chat_completion(messages, model=model)
+    return response.choices[0].message.content
+
+
+async def generate_text(prompt: str, model: str = "gpt-4o-mini", temperature: float = 0.7) -> str:
+    """
+    Generate text from a prompt.
     
     Args:
         prompt: The text prompt
-        model: OpenAI model to use
-        temperature: Sampling temperature
+        model: Model to use (default: gpt-4o-mini)
+        temperature: Sampling temperature (default: 0.7)
     
     Returns:
         Generated text
     """
-    return await simple_chat(prompt, model=model, temperature=temperature)
+    messages = [{"role": "user", "content": prompt}]
+    response = await chat_completion(messages, model=model, temperature=temperature)
+    return response.choices[0].message.content
 
