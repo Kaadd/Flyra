@@ -1,124 +1,204 @@
-import random
-import math
-from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
-from .airport_coordinates import get_airport_coordinates, AIRPORT_COORDINATES
+"""
+Flight service module for Flyra API.
 
-# Allowed flight numbers and their routes
-FLIGHT_ROUTES = {
-    "AB61510": {"dep": "SFO", "arr": "NRT", "dep_name": "San Francisco International", "arr_name": "Narita International Airport"},
-    "ZZ001": {"dep": "JFK", "arr": "LHR", "dep_name": "John F. Kennedy International", "arr_name": "London Heathrow"},
-}
+This module provides live flight data using the FlightRadar24 API.
+No mock data - all data is real-time from FlightRadar24.
+"""
 
-# List of allowed flight numbers
-ALLOWED_FLIGHT_NUMBERS = {"AB61510", "ZZ001"}
+from typing import Optional, Dict, Any
+from datetime import datetime
+
+from .flightDataApi import FlightRadar24API, FlightData
+
+
+# Singleton instance of the FlightRadar24 API client
+_flight_api: Optional[FlightRadar24API] = None
+
+
+def get_flight_api() -> FlightRadar24API:
+    """
+    Get the singleton FlightRadar24 API client instance.
+    
+    Returns:
+        FlightRadar24API: The API client instance
+    """
+    global _flight_api
+    if _flight_api is None:
+        _flight_api = FlightRadar24API()
+    return _flight_api
+
+
+def _knots_to_mph(knots: int) -> int:
+    """Convert knots to miles per hour."""
+    return int(knots * 1.15078)
 
 
 async def get_flight_info(flight_number: str) -> Optional[Dict[str, Any]]:
     """
-    Generate fake flight information.
+    Get LIVE flight information from FlightRadar24 API.
+    
+    This function fetches real-time flight data including position,
+    altitude, speed, and route information.
     
     Args:
-        flight_number: Flight number (must be "AB61510" or "ZZ001")
+        flight_number: Flight number/callsign (e.g., "UA837", "AA100")
     
     Returns:
-        Dictionary with flight information or None if not found
+        Dictionary with live flight information or None if not found
+        Compatible with the Swift Flight model
+    
+    Raises:
+        ValueError: If API token is missing or flight number is invalid
+        ConnectionError: If API request fails
     """
-    # Clean flight number (remove spaces, convert to uppercase)
+    if not flight_number or not flight_number.strip():
+        return None
+    
     flight_number = flight_number.strip().upper()
     
-    # Only allow specific flight numbers
-    if flight_number not in ALLOWED_FLIGHT_NUMBERS:
-        return None
-    
-    # Get route info (should always exist since we validated above)
-    route = FLIGHT_ROUTES.get(flight_number)
-    if not route:
-        return None
-    
-    # Get airport coordinates
-    dep_coords = get_airport_coordinates(route["dep"])
-    arr_coords = get_airport_coordinates(route["arr"])
-    
-    # Generate fake live tracking data
-    # Calculate a point along the route (about 60% of the way)
-    if dep_coords and arr_coords:
-        dep_lat, dep_lng = dep_coords
-        arr_lat, arr_lng = arr_coords
+    try:
+        api = get_flight_api()
+        flight_data: FlightData = api.get_flight_data(flight_number)
         
-        # Interpolate position (60% along route)
-        progress = 0.6
-        current_lat = dep_lat + (arr_lat - dep_lat) * progress
-        current_lng = dep_lng + (arr_lng - dep_lng) * progress
+        # Get current timestamp for the response
+        now = datetime.now()
         
-        # Calculate direction (bearing)
-        lat1, lon1 = math.radians(dep_lat), math.radians(dep_lng)
-        lat2, lon2 = math.radians(arr_lat), math.radians(arr_lng)
-        dlon = lon2 - lon1
-        y = math.sin(dlon) * math.cos(lat2)
-        x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
-        direction = int((math.degrees(math.atan2(y, x)) + 360) % 360)
+        # Convert speed from knots to mph for Swift app compatibility
+        speed_mph = _knots_to_mph(flight_data.flight_speed)
         
-        # Calculate distance remaining
-        R = 3959  # Earth radius in miles
-        dlat = lat2 - lat1
-        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        total_distance = R * c
-        distance_miles = int(total_distance * (1 - progress))
-    else:
-        current_lat = 40.0
-        current_lng = -100.0
-        direction = 270
-        distance_miles = 2500
-    
-    # Generate realistic flight data
-    now = datetime.now()
-    flight_time = now.strftime("%I:%M %p")
-    flight_date = now.strftime("%Y-%m-%d")
-    
-    # Random but realistic values
-    altitude_ft = random.randint(35000, 40000)  # Cruising altitude
-    speed_mph = random.randint(500, 600)  # Typical cruising speed
-    
-    # Calculate ETA (about 2-3 hours from now for long flights)
-    eta_time = now + timedelta(hours=random.randint(2, 3))
-    eta = eta_time.strftime("%I:%M %p")
-    
-    # Flight status
-    statuses = ["Active", "On time", "In flight", "En route"]
-    flight_status = random.choice(statuses)
-    
-    return {
-        "flight_id": flight_number,
-        "flight_number": flight_number,
-        "flight_status": flight_status,
-        "flight_time": flight_time,
-        "flight_date": flight_date,
-        "flight_gate": f"G{random.randint(1, 20)}",
-        "flight_terminal": str(random.randint(1, 5)),
-        # Additional context
-        "aircraft_type": "Boeing 777",
-        "departure_airport": route["dep_name"],
-        "arrival_airport": route["arr_name"],
-        "departure_delay": None,
-        "arrival_delay": None,
-        # Live tracking data
-        "altitude_ft": altitude_ft,
-        "speed_mph": speed_mph,
-        "latitude": current_lat,
-        "longitude": current_lng,
-        "direction": direction,
-        # Airport coordinates
-        "departure_latitude": dep_coords[0] if dep_coords else None,
-        "departure_longitude": dep_coords[1] if dep_coords else None,
-        "arrival_latitude": arr_coords[0] if arr_coords else None,
-        "arrival_longitude": arr_coords[1] if arr_coords else None,
-        # ETA and distance
-        "eta": eta,
-        "distance_miles": distance_miles,
-        "raw_data": {}  # Empty for fake data
-    }
+        # Build the response dictionary with live data
+        # All fields match the Swift Flight model CodingKeys
+        return {
+            # Required fields for Swift Flight model
+            "flight_id": flight_data.flight_id,
+            "flight_number": flight_number,
+            "flight_status": "In Flight",
+            "flight_time": now.strftime("%I:%M %p"),
+            "flight_date": now.strftime("%Y-%m-%d"),
+            "flight_gate": "N/A",  # Not available from FlightRadar24
+            "flight_terminal": "N/A",  # Not available from FlightRadar24
+            
+            # Optional fields
+            "aircraft_type": None,  # Not available in live API
+            "departure_airport": flight_data.flight_departure_airport,
+            "arrival_airport": flight_data.flight_arrival_airport,
+            "departure_delay": None,
+            "arrival_delay": None,
+            
+            # LIVE tracking data (real-time from FlightRadar24)
+            "altitude_ft": flight_data.flight_altitude,
+            "speed_mph": speed_mph,  # Converted from knots for Swift compatibility
+            "speed_knots": flight_data.flight_speed,  # Original value in knots
+            "latitude": flight_data.flight_latitude,
+            "longitude": flight_data.flight_longitude,
+            "direction": flight_data.flight_direction,
+            
+            # Airport coordinates (not available in live API)
+            "departure_latitude": None,
+            "departure_longitude": None,
+            "arrival_latitude": None,
+            "arrival_longitude": None,
+            
+            # ETA and distance (not available in live API)
+            "eta": None,
+            "distance_miles": None,
+            
+            # Metadata
+            "last_updated": now.isoformat(),
+            "data_source": "flightradar24",
+            "is_live": True,
+        }
+        
+    except ValueError as e:
+        # Flight not found or invalid input
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            return None
+        raise
+    except ConnectionError:
+        # API connection error - re-raise
+        raise
+    except Exception as e:
+        # Unexpected error
+        raise ConnectionError(f"Failed to fetch flight data: {str(e)}") from e
 
 
-
+async def search_flights_by_route(
+    departure: Optional[str] = None,
+    arrival: Optional[str] = None,
+    limit: int = 10
+) -> list[Dict[str, Any]]:
+    """
+    Search for live flights by route (departure/arrival airports).
+    
+    Args:
+        departure: Departure airport IATA code (e.g., "JFK")
+        arrival: Arrival airport IATA code (e.g., "LAX")
+        limit: Maximum number of results to return
+    
+    Returns:
+        List of flight dictionaries compatible with Swift Flight model
+    """
+    if not departure and not arrival:
+        return []
+    
+    try:
+        api = get_flight_api()
+        
+        # Build route query
+        routes = []
+        if departure and arrival:
+            routes = [f"{departure.upper()}-{arrival.upper()}"]
+        elif departure:
+            routes = [f"{departure.upper()}-"]
+        elif arrival:
+            routes = [f"-{arrival.upper()}"]
+        
+        # Query the live API
+        response = api.client.live.flight_positions.get_full(
+            routes=routes,
+            limit=limit
+        )
+        
+        if not response or not response.data:
+            return []
+        
+        # Convert to response format compatible with Swift Flight model
+        now = datetime.now()
+        flights = []
+        
+        for flight in response.data:
+            speed_knots = flight.gspeed
+            speed_mph = _knots_to_mph(speed_knots)
+            flight_number = flight.flight or flight.callsign or "Unknown"
+            
+            flights.append({
+                # Required fields
+                "flight_id": flight.fr24_id,
+                "flight_number": flight_number,
+                "flight_status": "In Flight",
+                "flight_time": now.strftime("%I:%M %p"),
+                "flight_date": now.strftime("%Y-%m-%d"),
+                "flight_gate": "N/A",
+                "flight_terminal": "N/A",
+                
+                # Optional fields
+                "departure_airport": flight.orig_iata or flight.orig_icao or "Unknown",
+                "arrival_airport": flight.dest_iata or flight.dest_icao or "Unknown",
+                "altitude_ft": flight.alt,
+                "speed_mph": speed_mph,
+                "speed_knots": speed_knots,
+                "latitude": flight.lat,
+                "longitude": flight.lon,
+                "direction": flight.track,
+                
+                # Metadata
+                "last_updated": now.isoformat(),
+                "data_source": "flightradar24",
+                "is_live": True,
+            })
+        
+        return flights
+        
+    except Exception as e:
+        raise ConnectionError(f"Failed to search flights: {str(e)}") from e
